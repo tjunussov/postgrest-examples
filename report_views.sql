@@ -1,3 +1,27 @@
+--------------------------------------------------------------------------------------------------------------
+
+-- VIEWS
+
+--DROP VIEW IF EXISTS sp_clients_search;
+CREATE VIEW sp_clients_search AS
+  SELECT "group", "discount", ("name"||' ('||phone||')')  AS search, "id" FROM sp_clients
+  WHERE "group" = current_setting('request.jwt.claim.group', TRUE);
+
+
+--DROP VIEW IF EXISTS daily_sales;
+CREATE VIEW daily_sales AS
+  SELECT tt.group AS "group", sum(tt.cnt) AS cnt, sum(tt.total) AS total, tt.sold AS "sold", array_to_json(array_agg(jsonb_build_object('type', tt.type, 'total', tt.total))) AS payments
+  FROM (
+         SELECT t.group AS "group", count(1) AS cnt, sum(t.amount) AS total, t.sold AS "sold", t.type AS "type"
+         FROM (
+                SELECT "group", (closed+'06:00:00'::INTERVAL)::DATE AS sold, jsonb_array_elements(payments)->>'type' AS "type", (jsonb_array_elements(payments)->>'amount')::integer AS amount
+                FROM sp_sales WHERE payments IS NOT NULL AND closed IS NOT NULL -- EXTRACTED EACH TYPE FROM PAYMENTS
+              ) AS t
+         GROUP BY t.group, t.sold, t.type  -- GROUPED BY EACH TYPE
+       ) AS tt
+  WHERE tt.type = 'Наличными' OR tt.type = 'Карточкой' GROUP BY tt.group, tt.sold;
+
+
 ---------------------------------------------------------------reports
 --drop VIEW sp_daily_sales2;
 
