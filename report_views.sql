@@ -823,3 +823,153 @@ select * from sp_sales as s where s.payed::date >= sales.date::date and s.payed:
                                   and s.group in (select g.code from sp_groups as g where g.parent = sales.group)
 $$ LANGUAGE SQL;
 
+
+                             \connect "smartpos"
+
+CREATE OR REPLACE VIEW public.sp_daily_sales AS
+ SELECT tt."group",
+    sum(tt.cnt) AS cnt,
+    sum(
+        CASE
+            WHEN tt.type = 'Наличными'::text OR tt.type = 'Карточкой'::text THEN tt.total
+            ELSE 0::bigint
+        END) AS total,
+    tt.sold::character varying AS sold,
+    array_to_json(array_agg(jsonb_build_object('type', tt.type, 'total', tt.total))) AS payments
+   FROM ( SELECT t."group",
+            count(1) AS cnt,
+            sum(t.amount) AS total,
+            t.sold,
+            t.type
+           FROM ( SELECT sp_sales."group",
+                    (sp_sales.closed + '06:00:00'::interval)::date AS sold,
+                    jsonb_array_elements(sp_sales.payments) ->> 'type'::text AS type,
+                    (jsonb_array_elements(sp_sales.payments) ->> 'amount'::text)::integer AS amount
+                   FROM sp_sales
+                  WHERE sp_sales.payments IS NOT NULL AND sp_sales.closed IS NOT NULL AND sp_sales.deleted IS NULL) t
+          GROUP BY t."group", t.sold, t.type
+          ORDER BY t.type) tt
+  GROUP BY tt."group", tt.sold
+  ORDER BY tt.sold;
+
+ALTER TABLE public.sp_daily_sales
+  OWNER TO postgres;
+GRANT ALL ON TABLE public.sp_daily_sales TO postgres;
+GRANT SELECT ON TABLE public.sp_daily_sales TO sp_superadmin;
+GRANT SELECT ON TABLE public.sp_daily_sales TO sp_admin;
+
+--------------------------------------------------------
+
+CREATE OR REPLACE FUNCTION public.sp_dately_sales(sold character varying DEFAULT (('now'::text)::date)::text)
+  RETURNS SETOF sp_daily_sales AS
+$BODY$
+
+ SELECT tt."group",
+    sum(tt.cnt) AS cnt,
+    sum(
+        CASE
+            WHEN tt.type = 'Наличными'::text OR tt.type = 'Карточкой'::text THEN tt.total
+            ELSE 0::bigint
+        END) AS total,
+    tt.sold::varchar,
+    array_to_json(array_agg(jsonb_build_object('type', tt.type, 'total', tt.total))) AS payments
+   FROM ( SELECT t."group",
+            count(1) AS cnt,
+            sum(t.amount) AS total,
+            t.sold,
+            t.type
+           FROM ( SELECT sp_sales."group",
+                    to_char(sp_sales.closed,substring('YYYY-MM-DD',1,char_length(sold))) AS sold,
+                    jsonb_array_elements(sp_sales.payments) ->> 'type'::text AS type,
+                    (jsonb_array_elements(sp_sales.payments) ->> 'amount'::text)::integer AS amount
+                   FROM sp_sales
+                  WHERE sp_sales.payments IS NOT NULL AND sp_sales.closed IS NOT NULL AND sp_sales.deleted IS NULL
+	  ) t
+          GROUP BY t."group", sold, t.type
+          ORDER BY t.type) tt
+  WHERE tt.sold = sp_dately_sales.sold
+  GROUP BY tt."group", tt.sold
+  ORDER BY tt.sold;
+
+
+$BODY$
+  LANGUAGE sql STABLE
+  COST 100
+  ROWS 1000;
+ALTER FUNCTION public.sp_dately_sales(character varying)
+  OWNER TO postgres;
+
+----------------------------------------------------
+
+CREATE OR REPLACE VIEW public.sp_v_sales AS
+ SELECT sp_sales.id,
+    sp_sales."group",
+    sp_sales.code,
+    sp_sales.created,
+    sp_sales.starts,
+    sp_sales.ends,
+    sp_sales.closed,
+    sp_sales.edited,
+    sp_sales.total,
+    sp_sales.status,
+    sp_sales.creator,
+    sp_sales.performer,
+    sp_sales.client,
+    sp_sales.assets,
+    sp_sales.goods,
+    sp_sales.payments,
+    sp_sales.configs,
+    sp_sales.deleted,
+    sp_sales.returned
+   FROM sp_sales;
+
+ALTER TABLE public.sp_v_sales
+  OWNER TO postgres;
+
+------------------------------------
+
+CREATE OR REPLACE FUNCTION public.sp_dately_sales(
+    "group" character varying,
+    sold character varying DEFAULT (('now'::text)::date)::text)
+  RETURNS SETOF sp_daily_sales AS
+$BODY$
+
+ SELECT tt."group",
+    sum(tt.cnt) AS cnt,
+    sum(
+        CASE
+            WHEN tt.type = 'Наличными'::text OR tt.type = 'Карточкой'::text THEN tt.total
+            ELSE 0::bigint
+        END) AS total,
+    tt.sold::varchar,
+    array_to_json(array_agg(jsonb_build_object('type', tt.type, 'total', tt.total))) AS payments
+   FROM ( SELECT t."group",
+            count(1) AS cnt,
+            sum(t.amount) AS total,
+            t.sold,
+            t.type
+           FROM ( SELECT sp_v_sales."group",
+                    to_char(sp_v_sales.closed,substring('YYYY-MM-DD',1,char_length(sp_dately_sales.sold))) AS sold,
+                    jsonb_array_elements(sp_v_sales.payments) ->> 'type'::text AS type,
+                    (jsonb_array_elements(sp_v_sales.payments) ->> 'amount'::text)::integer AS amount
+                   FROM sp_v_sales
+                  WHERE ( sp_dately_sales.group IS NULL OR sp_dately_sales.group = sp_v_sales.group )
+			AND sp_v_sales.payments IS NOT NULL
+			AND sp_v_sales.closed IS NOT NULL
+			AND sp_v_sales.deleted IS NULL
+	  ) t
+          GROUP BY t."group", sold, t.type
+          ORDER BY t.type) tt
+  WHERE tt.sold = sp_dately_sales.sold
+  GROUP BY tt."group", tt.sold
+  ORDER BY tt.sold;
+
+
+$BODY$
+  LANGUAGE sql STABLE
+  COST 100
+  ROWS 1000;
+ALTER FUNCTION public.sp_dately_sales(character varying, character varying)
+  OWNER TO postgres;
+
+-------------------------------------
