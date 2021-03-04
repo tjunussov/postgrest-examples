@@ -2,25 +2,6 @@
 
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
-CREATE OR REPLACE FUNCTION encrypt_pass() RETURNS TRIGGER
-LANGUAGE plpgsql
-AS $$
-BEGIN
-  IF tg_op = 'INSERT' OR new.pass <> old.pass THEN
-    new.pass = crypt(new.pass, gen_salt('md5'));
-  END IF;
-  RETURN new;
-END
-$$;
-
-
---DROP TRIGGER IF EXISTS encrypt_pass ON sp_users;
-CREATE TRIGGER encrypt_pass
-BEFORE INSERT OR UPDATE ON sp_users
-FOR EACH ROW
-EXECUTE PROCEDURE encrypt_pass();
-
-
 -- JWT configurations
 
 CREATE OR REPLACE FUNCTION
@@ -81,3 +62,23 @@ $$;
 
 --DROP TYPE IF EXISTS jwt_token CASCADE;
 CREATE TYPE jwt_token AS (token TEXT);
+                        
+//////////////////
+                        
+CREATE OR REPLACE FUNCTION encrypt_pass() RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
+BEGIN
+  IF tg_op = 'INSERT' OR new.pass <> old.pass THEN
+    new.pass = crypt(new.pass, gen_salt('md5'));
+  END IF;
+  RETURN new;
+END
+$$;
+
+
+--DROP TRIGGER IF EXISTS encrypt_pass ON sp_users;
+CREATE TRIGGER encrypt_pass
+BEFORE INSERT OR UPDATE ON sp_users
+FOR EACH ROW
+EXECUTE PROCEDURE encrypt_pass();
